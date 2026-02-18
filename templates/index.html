@@ -128,39 +128,45 @@
                             <button @click="downloadAllPDF" class="bg-red-800 text-white px-4 py-2 rounded shadow hover:bg-red-900">Download All PDF</button>
                         </div>
 
-                        <!-- Field Controls -->
-                        <div class="mb-4 p-2 border rounded bg-gray-50 flex items-center space-x-4 min-h-[60px]">
+                        <!-- Element Controls (Unified) -->
+                        <div class="mb-4 p-2 border rounded bg-gray-50 flex items-center space-x-4 min-h-[60px] shadow-sm">
+                            <!-- Field Selected -->
                             <template v-if="selectedFieldIndex !== null">
-                                <span class="font-bold">{{ activeFields[selectedFieldIndex].name }}</span>
-                                <div class="flex items-center space-x-2">
-                                    <label class="text-xs">Font Size:</label>
-                                    <button @click="adjustFontSize(-2)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">-</button>
+                                <span class="font-bold text-blue-800">Field: {{ activeFields[selectedFieldIndex].name }}</span>
+                                <div class="flex items-center space-x-2 border-l pl-4">
+                                    <label class="text-xs font-semibold">Font Size:</label>
+                                    <button @click="adjustFontSize(-2)" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 font-bold">-</button>
                                     <input type="number" v-model="activeFields[selectedFieldIndex].fontSize" @change="saveConfig" class="w-16 border p-1 rounded text-center">
-                                    <button @click="adjustFontSize(2)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">+</button>
+                                    <button @click="adjustFontSize(2)" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 font-bold">+</button>
                                 </div>
-                                <div>
-                                    <label class="text-xs">Font:</label>
-                                    <select v-model="activeFields[selectedFieldIndex].fontFamily" @change="saveConfig" class="border p-1 rounded">
+                                <div class="flex items-center space-x-2 border-l pl-4">
+                                    <label class="text-xs font-semibold">Font Family:</label>
+                                    <select v-model="activeFields[selectedFieldIndex].fontFamily" @change="saveConfig" class="border p-1 rounded text-sm">
                                         <option v-for="f in (activeFields[selectedFieldIndex].isHindi ? fonts.hindi : fonts.english)" :key="f" :value="f">{{ f }}</option>
                                     </select>
                                 </div>
-                                <button @click="removeField(selectedFieldIndex)" class="text-red-600 text-sm font-bold">Remove</button>
+                                <button @click="removeField(selectedFieldIndex)" class="ml-auto bg-red-50 text-red-600 px-3 py-1 rounded hover:bg-red-100 text-sm font-bold border border-red-200">Remove</button>
                             </template>
-                            <div v-else class="text-gray-400 text-sm italic">
-                                Select a field in the preview to edit its style
-                            </div>
-                        </div>
 
-                        <!-- Signature Controls -->
-                        <div v-if="selectedSigIndex !== null" class="mb-4 p-2 border rounded bg-gray-50 flex items-center space-x-4">
-                            <span class="font-bold text-green-700">Signature {{ activeSignatures[selectedSigIndex].id }}</span>
-                            <div class="flex items-center space-x-2">
-                                <label class="text-xs">Size:</label>
-                                <button @click="adjustSigSize(-10)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">-</button>
-                                <span class="text-xs">{{ Math.round(activeSignatures[selectedSigIndex].width) }}x{{ Math.round(activeSignatures[selectedSigIndex].height) }}</span>
-                                <button @click="adjustSigSize(10)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">+</button>
+                            <!-- Signature Selected -->
+                            <template v-else-if="selectedSigIndex !== null">
+                                <span class="font-bold text-green-800">Signature {{ activeSignatures[selectedSigIndex].id }}</span>
+                                <div class="flex items-center space-x-3 border-l pl-4">
+                                    <label class="text-xs font-semibold">Scale Image:</label>
+                                    <button @click="adjustSigSize(-10)" class="px-4 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 font-extrabold text-lg shadow-sm" title="Decrease Size">-</button>
+                                    <div class="flex flex-col items-center">
+                                        <span class="text-[10px] text-gray-500 uppercase font-bold">Dimensions</span>
+                                        <span class="text-xs font-mono bg-white px-2 border rounded">{{ Math.round(activeSignatures[selectedSigIndex].width) }} × {{ Math.round(activeSignatures[selectedSigIndex].height) }}</span>
+                                    </div>
+                                    <button @click="adjustSigSize(10)" class="px-4 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 font-extrabold text-lg shadow-sm" title="Increase Size">+</button>
+                                </div>
+                                <button @click="selectedSigIndex = null" class="ml-auto text-blue-600 text-sm font-bold hover:underline">Deselect</button>
+                            </template>
+
+                            <!-- Nothing Selected -->
+                            <div v-else class="w-full text-center text-gray-400 text-sm italic">
+                                Select a field or signature in the preview pane to edit its properties
                             </div>
-                            <button @click="selectedSigIndex = null" class="text-blue-600 text-sm font-bold">Deselect</button>
                         </div>
 
                         <!-- Preview Pane Container -->
@@ -278,7 +284,7 @@
 {% endraw %}
     <script>
         const { createApp } = Vue;
-        createApp({
+        const app = createApp({
             data() {
                 return {
                     excelColumns: [],
@@ -671,7 +677,8 @@
                     });
                 }
             }
-        }).mount('#app');
+        });
+        window.app = app.mount('#app');
     </script>
 </body>
 </html>
