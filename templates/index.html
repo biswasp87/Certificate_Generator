@@ -38,16 +38,26 @@
 
         <main class="max-w-7xl mx-auto px-4">
             <!-- Excel Upload Section -->
-            <section v-if="!columnsMarked" class="bg-white p-8 rounded-lg shadow-md mb-8">
-                <h2 class="text-2xl font-bold mb-4">Step 1: Upload Excel Data</h2>
-                <div class="flex items-center space-x-4">
-                    <input type="file" @change="handleExcelUpload" accept=".xlsx, .xls" class="border p-2 rounded">
-                    <button v-if="excelColumns.length" @click="showMappingModal = true" class="bg-green-600 text-white px-4 py-2 rounded">Mark Columns</button>
+            <section class="bg-white p-8 rounded-lg shadow-md mb-8">
+                <h2 class="text-2xl font-bold mb-4">1. Data Source (Excel)</h2>
+                <div v-if="!columnsMarked">
+                    <div class="flex items-center space-x-4">
+                        <input type="file" @change="handleExcelUpload" accept=".xlsx, .xls" class="border p-2 rounded">
+                        <button v-if="excelColumns.length" @click="showMappingModal = true" class="bg-green-600 text-white px-4 py-2 rounded">Mark Columns</button>
+                    </div>
+                    <p v-if="excelColumns.length" class="mt-2 text-sm text-gray-600">Excel loaded. Please mark Hindi columns.</p>
+                </div>
+                <div v-else class="flex items-center justify-between bg-green-50 p-4 rounded border border-green-200">
+                    <div>
+                        <span class="font-bold text-green-800">Excel Data Ready:</span>
+                        <span class="ml-2 text-green-700">{{ excelColumns.length }} columns, {{ excelData.length }} rows found.</span>
+                    </div>
+                    <button @click="showMappingModal = true" class="text-blue-600 hover:underline font-medium">Edit Column Mapping</button>
                 </div>
             </section>
 
             <!-- Template Management -->
-            <section v-if="columnsMarked" class="grid grid-cols-12 gap-6">
+            <section class="grid grid-cols-12 gap-6">
                 <!-- Template List & Upload -->
                 <div class="col-span-12 bg-white p-6 rounded-lg shadow-md mb-6">
                     <h2 class="text-xl font-bold mb-4">Templates</h2>
@@ -226,14 +236,29 @@
                 async handleExcelUpload(event) {
                     const file = event.target.files[0];
                     if (!file) return;
+                    console.log("File selected:", file.name);
                     const formData = new FormData();
                     formData.append('file', file);
-                    const res = await fetch('/upload_excel', { method: 'POST', body: formData });
-                    const data = await res.json();
-                    this.excelColumns = data.columns;
-                    this.excelData = data.data;
-                    this.excelColumns.forEach(c => this.hindiMapping[c] = false);
-                    this.showMappingModal = true;
+                    try {
+                        const res = await fetch('/upload_excel', { method: 'POST', body: formData });
+                        if (!res.ok) {
+                            const err = await res.json();
+                            throw new Error(err.error || "Failed to upload excel");
+                        }
+                        const data = await res.json();
+                        console.log("Excel data received:", data);
+                        this.excelColumns = data.columns;
+                        this.excelData = data.data;
+                        this.excelColumns.forEach(c => {
+                            if (this.hindiMapping[c] === undefined) {
+                                this.hindiMapping[c] = false;
+                            }
+                        });
+                        this.showMappingModal = true;
+                    } catch (e) {
+                        console.error("Error in handleExcelUpload:", e);
+                        alert("Error: " + e.message);
+                    }
                 },
                 async saveMapping() {
                     const columns = this.excelColumns.map(c => ({ name: c, is_hindi: this.hindiMapping[c] }));
@@ -265,10 +290,19 @@
                     document.getElementById('dynamic-fonts').innerHTML = css;
                 },
                 async uploadTemplate() {
+                    if (!this.newTemplateFile) {
+                        alert("Please select a template image");
+                        return;
+                    }
                     const formData = new FormData();
                     formData.append('name', this.newTemplateName);
                     formData.append('file', this.newTemplateFile);
                     const res = await fetch('/upload_template', { method: 'POST', body: formData });
+                    if (!res.ok) {
+                        const err = await res.json();
+                        alert("Template upload failed: " + (err.error || res.statusText));
+                        return;
+                    }
                     const result = await res.json();
 
                     const sigData = new FormData();

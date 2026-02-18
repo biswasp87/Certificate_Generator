@@ -4,6 +4,7 @@ from flask import Flask, request, jsonify, send_from_directory, render_template
 from flask_cors import CORS
 from models import db, Template, ExcelColumn, ExcelRow
 from PIL import Image
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 CORS(app)
@@ -28,13 +29,23 @@ def index():
 
 @app.route('/upload_excel', methods=['POST'])
 def upload_excel():
+    print("Received upload_excel request")
     if 'file' not in request.files:
+        print("Error: No file part in request")
         return jsonify({'error': 'No file part'}), 400
     file = request.files['file']
     if file.filename == '':
+        print("Error: No selected file")
         return jsonify({'error': 'No selected file'}), 400
 
-    df = pd.read_excel(file)
+    print(f"Reading excel file: {file.filename}")
+    try:
+        df = pd.read_excel(file)
+        print(f"Excel file read successfully. Columns: {df.columns.tolist()}")
+    except Exception as e:
+        print(f"Error reading excel file: {str(e)}")
+        return jsonify({'error': f'Failed to read Excel file: {str(e)}'}), 500
+
     columns = df.columns.tolist()
     # Temporarily store data in session or a temporary file?
     # For simplicity, let's just return the columns and the data to the frontend to send back.
@@ -48,6 +59,7 @@ def upload_excel():
 
 @app.route('/save_mapping', methods=['POST'])
 def save_mapping():
+    print("Received save_mapping request")
     req_data = request.json
     columns_info = req_data.get('columns', []) # list of {name, is_hindi}
     rows_data = req_data.get('data', [])
@@ -102,12 +114,15 @@ def list_templates():
 
 @app.route('/upload_template', methods=['POST'])
 def upload_template():
+    print(f"Received upload_template request for: {request.form.get('name')}")
     name = request.form.get('name', 'Untitled')
     file = request.files.get('file')
     if not file:
         return jsonify({'error': 'No file'}), 400
 
-    filename = f"template_{name}_{file.filename}"
+    safe_name = secure_filename(name)
+    safe_filename = secure_filename(file.filename)
+    filename = f"template_{safe_name}_{safe_filename}"
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'templates', filename)
     file.save(filepath)
 
@@ -145,7 +160,8 @@ def upload_signatures(template_id):
     for i in range(1, 5):
         file = request.files.get(f'sig{i}')
         if file:
-            filename = f"sig{i}_{template.id}_{file.filename}"
+            safe_filename = secure_filename(file.filename)
+            filename = f"sig{i}_{template.id}_{safe_filename}"
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'signatures', filename)
             file.save(filepath)
             setattr(template, f'sig{i}_path', f"signatures/{filename}")
