@@ -87,14 +87,7 @@
                     <!-- Left: English Fields -->
                     <div class="col-span-2 bg-white p-4 rounded-lg shadow-md">
                         <h3 class="font-bold mb-2 border-b">English Fields</h3>
-                        <div class="mb-4">
-                            <label class="text-xs block">Default Font:</label>
-                            <select v-model="defaultEnglishFont" class="w-full text-xs border rounded p-1">
-                                <option v-for="f in fonts.english" :key="f" :value="f">{{ f }}</option>
-                            </select>
-                        </div>
                         <div v-for="col in englishColumns" :key="col.name" class="mb-2 flex items-center space-x-2">
-                            <input type="checkbox" :checked="isFieldActive(col.name)" @change="toggleField(col)" title="Toggle Visibility">
                             <button @click="addFieldToPreview(col)" class="flex-grow text-left p-2 bg-blue-50 hover:bg-blue-100 rounded text-sm">
                                 {{ col.name }}
                             </button>
@@ -110,7 +103,7 @@
                             <div class="flex items-center space-x-2">
                                 <button @click="prevRecord" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">&lt; Prev</button>
                                 <div class="flex items-center">
-                                    <input type="number" v-model.number="currentRecordIndex" @change="validateRecordIndex" class="w-16 border rounded px-2 py-1 text-center">
+                                    <input type="number" :value="currentRecordIndex + 1" @change="updateRecordIndex($event.target.value)" class="w-16 border rounded px-2 py-1 text-center">
                                     <span class="ml-1">/ {{ excelData.length }}</span>
                                 </div>
                                 <button @click="nextRecord" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Next &gt;</button>
@@ -136,21 +129,26 @@
                         </div>
 
                         <!-- Field Controls -->
-                        <div v-if="selectedFieldIndex !== null" class="mb-4 p-2 border rounded bg-gray-50 flex items-center space-x-4">
-                            <span class="font-bold">{{ activeFields[selectedFieldIndex].name }}</span>
-                            <div class="flex items-center space-x-2">
-                                <label class="text-xs">Font Size:</label>
-                                <button @click="adjustFontSize(-2)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">-</button>
-                                <input type="number" v-model="activeFields[selectedFieldIndex].fontSize" @change="saveConfig" class="w-16 border p-1 rounded text-center">
-                                <button @click="adjustFontSize(2)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">+</button>
+                        <div class="mb-4 p-2 border rounded bg-gray-50 flex items-center space-x-4 min-h-[60px]">
+                            <template v-if="selectedFieldIndex !== null">
+                                <span class="font-bold">{{ activeFields[selectedFieldIndex].name }}</span>
+                                <div class="flex items-center space-x-2">
+                                    <label class="text-xs">Font Size:</label>
+                                    <button @click="adjustFontSize(-2)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">-</button>
+                                    <input type="number" v-model="activeFields[selectedFieldIndex].fontSize" @change="saveConfig" class="w-16 border p-1 rounded text-center">
+                                    <button @click="adjustFontSize(2)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">+</button>
+                                </div>
+                                <div>
+                                    <label class="text-xs">Font:</label>
+                                    <select v-model="activeFields[selectedFieldIndex].fontFamily" @change="saveConfig" class="border p-1 rounded">
+                                        <option v-for="f in (activeFields[selectedFieldIndex].isHindi ? fonts.hindi : fonts.english)" :key="f" :value="f">{{ f }}</option>
+                                    </select>
+                                </div>
+                                <button @click="removeField(selectedFieldIndex)" class="text-red-600 text-sm font-bold">Remove</button>
+                            </template>
+                            <div v-else class="text-gray-400 text-sm italic">
+                                Select a field in the preview to edit its style
                             </div>
-                            <div>
-                                <label class="text-xs">Font:</label>
-                                <select v-model="activeFields[selectedFieldIndex].fontFamily" @change="saveConfig" class="border p-1 rounded">
-                                    <option v-for="f in (activeFields[selectedFieldIndex].isHindi ? fonts.hindi : fonts.english)" :key="f" :value="f">{{ f }}</option>
-                                </select>
-                            </div>
-                            <button @click="removeField(selectedFieldIndex)" class="text-red-600 text-sm font-bold">Remove</button>
                         </div>
 
                         <!-- Signature Controls -->
@@ -212,14 +210,7 @@
                     <!-- Right: Hindi Fields -->
                     <div class="col-span-2 bg-white p-4 rounded-lg shadow-md">
                         <h3 class="font-bold mb-2 border-b">Hindi Fields</h3>
-                        <div class="mb-4">
-                            <label class="text-xs block">Default Font:</label>
-                            <select v-model="defaultHindiFont" class="w-full text-xs border rounded p-1">
-                                <option v-for="f in fonts.hindi" :key="f" :value="f">{{ f }}</option>
-                            </select>
-                        </div>
                         <div v-for="col in hindiColumns" :key="col.name" class="mb-2 flex items-center space-x-2">
-                            <input type="checkbox" :checked="isFieldActive(col.name)" @change="toggleField(col)" title="Toggle Visibility">
                             <button @click="addFieldToPreview(col)" class="flex-grow text-left p-2 bg-orange-50 hover:bg-orange-100 rounded text-sm">
                                 {{ col.name }}
                             </button>
@@ -308,9 +299,7 @@
                     fonts: { hindi: [], english: [] },
                     currentRecordIndex: 0,
                     withTemplate: true,
-                    draggingEnabled: true,
-                    defaultHindiFont: '',
-                    defaultEnglishFont: ''
+                    draggingEnabled: true
                 }
             },
             watch: {
@@ -457,7 +446,6 @@
                     this.$nextTick(() => this.initDraggable());
                 },
                 addFieldToPreview(col) {
-                    const font = col.isHindi ? this.defaultHindiFont : this.defaultEnglishFont;
                     this.activeFields.push({
                         name: col.name,
                         isHindi: col.isHindi,
@@ -465,7 +453,7 @@
                         y: 100,
                         fontSize: 40,
                         visible: true,
-                        fontFamily: font || (col.isHindi ? (this.fonts.hindi[0] || 'serif') : (this.fonts.english[0] || 'sans-serif'))
+                        fontFamily: col.isHindi ? (this.fonts.hindi[0] || 'serif') : (this.fonts.english[0] || 'sans-serif')
                     });
                     this.$nextTick(() => this.initDraggable());
                 },
@@ -492,19 +480,6 @@
                 removeField(index) {
                     this.activeFields.splice(index, 1);
                     this.selectedFieldIndex = null;
-                    this.saveConfig();
-                },
-                isFieldActive(name) {
-                    const field = this.activeFields.find(f => f.name === name);
-                    return field ? (field.visible !== false) : false;
-                },
-                toggleField(col) {
-                    const field = this.activeFields.find(f => f.name === col.name);
-                    if (field) {
-                        field.visible = !field.visible;
-                    } else {
-                        this.addFieldToPreview(col);
-                    }
                     this.saveConfig();
                 },
                 adjustFontSize(delta) {
@@ -564,9 +539,12 @@
                 nextRecord() {
                     if (this.currentRecordIndex < this.excelData.length - 1) this.currentRecordIndex++;
                 },
-                validateRecordIndex() {
-                    if (this.currentRecordIndex < 0) this.currentRecordIndex = 0;
-                    if (this.currentRecordIndex >= this.excelData.length) this.currentRecordIndex = this.excelData.length - 1;
+                updateRecordIndex(val) {
+                    let idx = parseInt(val) - 1;
+                    if (isNaN(idx)) idx = 0;
+                    if (idx < 0) idx = 0;
+                    if (this.excelData.length > 0 && idx >= this.excelData.length) idx = this.excelData.length - 1;
+                    this.currentRecordIndex = idx;
                 },
                 async downloadPDF() {
                     const pdf = await this.capturePreview();
