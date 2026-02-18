@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/interactjs/dist/interact.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style id="dynamic-fonts"></style>
     <style>
         .draggable {
@@ -55,7 +57,10 @@
                         <span class="font-bold text-green-800">Excel Data Ready:</span>
                         <span class="ml-2 text-green-700">{{ excelColumns.length }} columns, {{ excelData.length }} rows found.</span>
                     </div>
-                    <button @click="showMappingModal = true" class="text-blue-600 hover:underline font-medium">Edit Column Mapping</button>
+                    <div class="space-x-4">
+                        <button @click="showMappingModal = true" class="text-blue-600 hover:underline font-medium">Edit Column Mapping</button>
+                        <button @click="clearData" class="bg-red-100 text-red-600 px-3 py-1 rounded hover:bg-red-200 text-sm font-bold">Clear Data</button>
+                    </div>
                 </div>
             </section>
 
@@ -88,8 +93,9 @@
                                 <option v-for="f in fonts.english" :key="f" :value="f">{{ f }}</option>
                             </select>
                         </div>
-                        <div v-for="col in englishColumns" :key="col.name" class="mb-2">
-                            <button @click="addFieldToPreview(col)" class="w-full text-left p-2 bg-blue-50 hover:bg-blue-100 rounded text-sm">
+                        <div v-for="col in englishColumns" :key="col.name" class="mb-2 flex items-center space-x-2">
+                            <input type="checkbox" :checked="isFieldActive(col.name)" @change="toggleField(col)" title="Toggle Visibility">
+                            <button @click="addFieldToPreview(col)" class="flex-grow text-left p-2 bg-blue-50 hover:bg-blue-100 rounded text-sm">
                                 {{ col.name }}
                             </button>
                         </div>
@@ -132,9 +138,11 @@
                         <!-- Field Controls -->
                         <div v-if="selectedFieldIndex !== null" class="mb-4 p-2 border rounded bg-gray-50 flex items-center space-x-4">
                             <span class="font-bold">{{ activeFields[selectedFieldIndex].name }}</span>
-                            <div>
+                            <div class="flex items-center space-x-2">
                                 <label class="text-xs">Font Size:</label>
-                                <input type="number" v-model="activeFields[selectedFieldIndex].fontSize" @change="saveConfig" class="w-16 border p-1 rounded">
+                                <button @click="adjustFontSize(-2)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">-</button>
+                                <input type="number" v-model="activeFields[selectedFieldIndex].fontSize" @change="saveConfig" class="w-16 border p-1 rounded text-center">
+                                <button @click="adjustFontSize(2)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">+</button>
                             </div>
                             <div>
                                 <label class="text-xs">Font:</label>
@@ -142,13 +150,26 @@
                                     <option v-for="f in (activeFields[selectedFieldIndex].isHindi ? fonts.hindi : fonts.english)" :key="f" :value="f">{{ f }}</option>
                                 </select>
                             </div>
-                            <button @click="removeField(selectedFieldIndex)" class="text-red-600 text-sm">Remove</button>
+                            <button @click="removeField(selectedFieldIndex)" class="text-red-600 text-sm font-bold">Remove</button>
+                        </div>
+
+                        <!-- Signature Controls -->
+                        <div v-if="selectedSigIndex !== null" class="mb-4 p-2 border rounded bg-gray-50 flex items-center space-x-4">
+                            <span class="font-bold text-green-700">Signature {{ activeSignatures[selectedSigIndex].id }}</span>
+                            <div class="flex items-center space-x-2">
+                                <label class="text-xs">Size:</label>
+                                <button @click="adjustSigSize(-10)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">-</button>
+                                <span class="text-xs">{{ Math.round(activeSignatures[selectedSigIndex].width) }}x{{ Math.round(activeSignatures[selectedSigIndex].height) }}</span>
+                                <button @click="adjustSigSize(10)" class="px-2 bg-gray-200 rounded hover:bg-gray-300">+</button>
+                            </div>
+                            <button @click="selectedSigIndex = null" class="text-blue-600 text-sm font-bold">Deselect</button>
                         </div>
 
                         <!-- Preview Pane Container -->
                         <div class="preview-pane shadow-2xl" :style="previewStyle" @click.self="selectedFieldIndex = null; selectedSigIndex = null">
                             <!-- Fields -->
                             <div v-for="(field, index) in activeFields" :key="'field-'+index"
+                                 v-show="field.visible !== false"
                                  class="draggable"
                                  :class="{'ring-2 ring-blue-500': selectedFieldIndex === index, 'dragging-enabled': draggingEnabled}"
                                  :id="'field-' + index"
@@ -197,8 +218,9 @@
                                 <option v-for="f in fonts.hindi" :key="f" :value="f">{{ f }}</option>
                             </select>
                         </div>
-                        <div v-for="col in hindiColumns" :key="col.name" class="mb-2">
-                            <button @click="addFieldToPreview(col)" class="w-full text-left p-2 bg-orange-50 hover:bg-orange-100 rounded text-sm">
+                        <div v-for="col in hindiColumns" :key="col.name" class="mb-2 flex items-center space-x-2">
+                            <input type="checkbox" :checked="isFieldActive(col.name)" @change="toggleField(col)" title="Toggle Visibility">
+                            <button @click="addFieldToPreview(col)" class="flex-grow text-left p-2 bg-orange-50 hover:bg-orange-100 rounded text-sm">
                                 {{ col.name }}
                             </button>
                         </div>
@@ -322,6 +344,7 @@
             mounted() {
                 this.loadTemplates();
                 this.loadFonts();
+                this.loadExcelData();
             },
             methods: {
                 async handleExcelUpload(event) {
@@ -369,6 +392,16 @@
                     const res = await fetch('/fonts');
                     this.fonts = await res.json();
                     this.updateFontStyles();
+                },
+                async loadExcelData() {
+                    const res = await fetch('/excel_data');
+                    const data = await res.json();
+                    if (data.columns.length > 0) {
+                        this.excelColumns = data.columns;
+                        this.hindiMapping = data.hindi_mapping;
+                        this.excelData = data.data;
+                        this.columnsMarked = true;
+                    }
                 },
                 updateFontStyles() {
                     let css = '';
@@ -425,13 +458,13 @@
                 },
                 addFieldToPreview(col) {
                     const font = col.isHindi ? this.defaultHindiFont : this.defaultEnglishFont;
-                    const scale = this.previewScale;
                     this.activeFields.push({
                         name: col.name,
                         isHindi: col.isHindi,
-                        x: 100, // Original pixels
-                        y: 100, // Original pixels
-                        fontSize: 40, // Original pixels
+                        x: 100,
+                        y: 100,
+                        fontSize: 40,
+                        visible: true,
                         fontFamily: font || (col.isHindi ? (this.fonts.hindi[0] || 'serif') : (this.fonts.english[0] || 'sans-serif'))
                     });
                     this.$nextTick(() => this.initDraggable());
@@ -460,6 +493,41 @@
                     this.activeFields.splice(index, 1);
                     this.selectedFieldIndex = null;
                     this.saveConfig();
+                },
+                isFieldActive(name) {
+                    const field = this.activeFields.find(f => f.name === name);
+                    return field ? (field.visible !== false) : false;
+                },
+                toggleField(col) {
+                    const field = this.activeFields.find(f => f.name === col.name);
+                    if (field) {
+                        field.visible = !field.visible;
+                    } else {
+                        this.addFieldToPreview(col);
+                    }
+                    this.saveConfig();
+                },
+                adjustFontSize(delta) {
+                    if (this.selectedFieldIndex !== null) {
+                        this.activeFields[this.selectedFieldIndex].fontSize = Math.max(8, this.activeFields[this.selectedFieldIndex].fontSize + delta);
+                        this.saveConfig();
+                    }
+                },
+                adjustSigSize(delta) {
+                    if (this.selectedSigIndex !== null) {
+                        const sig = this.activeSignatures[this.selectedSigIndex];
+                        const ratio = sig.height / sig.width;
+                        sig.width = Math.max(20, sig.width + delta);
+                        sig.height = sig.width * ratio;
+                        this.saveConfig();
+                    }
+                },
+                async clearData() {
+                    if (!confirm("Are you sure you want to clear all Excel data and mappings?")) return;
+                    await fetch('/clear_data', { method: 'POST' });
+                    this.excelColumns = [];
+                    this.excelData = [];
+                    this.columnsMarked = false;
                 },
                 selectSig(index) {
                     if (!this.draggingEnabled) return;
@@ -501,41 +569,67 @@
                     if (this.currentRecordIndex >= this.excelData.length) this.currentRecordIndex = this.excelData.length - 1;
                 },
                 async downloadPDF() {
-                    const res = await fetch('/generate_pdf', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            template_id: this.selectedTemplate.id,
-                            record_index: this.currentRecordIndex,
-                            with_template: this.withTemplate
-                        })
-                    });
-                    const blob = await res.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `certificate_${this.currentRecordIndex}.pdf`;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
+                    const pdf = await this.capturePreview();
+                    pdf.save(`certificate_${this.currentRecordIndex + 1}.pdf`);
                 },
                 async downloadAllPDF() {
-                    const res = await fetch('/generate_all_pdf', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            template_id: this.selectedTemplate.id,
-                            with_template: this.withTemplate
-                        })
+                    const { jsPDF } = window.jspdf;
+                    let finalPdf = null;
+                    const originalIndex = this.currentRecordIndex;
+
+                    for (let i = 0; i < this.excelData.length; i++) {
+                        this.currentRecordIndex = i;
+                        await this.$nextTick();
+                        await new Promise(r => setTimeout(r, 150)); // Wait for render
+
+                        const canvas = await this.getCanvas();
+                        const img = canvas.toDataURL("image/png");
+
+                        if (!finalPdf) {
+                            finalPdf = new jsPDF({
+                                orientation: 'landscape',
+                                unit: 'px',
+                                format: [canvas.width / 2, canvas.height / 2]
+                            });
+                        } else {
+                            finalPdf.addPage([canvas.width / 2, canvas.height / 2], 'landscape');
+                        }
+                        finalPdf.addImage(img, 'PNG', 0, 0, canvas.width / 2, canvas.height / 2);
+                    }
+
+                    this.currentRecordIndex = originalIndex;
+                    if (finalPdf) finalPdf.save("all_certificates.pdf");
+                },
+                async getCanvas() {
+                    const element = document.querySelector(".preview-pane");
+                    const originalBG = element.style.backgroundImage;
+                    if (!this.withTemplate) {
+                        element.style.backgroundImage = 'none';
+                        element.style.backgroundColor = 'white';
+                    }
+
+                    const canvas = await html2canvas(element, {
+                        scale: 2,
+                        useCORS: true,
+                        backgroundColor: this.withTemplate ? null : "#ffffff"
                     });
-                    const blob = await res.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `all_certificates.pdf`;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
+
+                    if (!this.withTemplate) {
+                        element.style.backgroundImage = originalBG;
+                    }
+                    return canvas;
+                },
+                async capturePreview() {
+                    const { jsPDF } = window.jspdf;
+                    const canvas = await this.getCanvas();
+                    const imgData = canvas.toDataURL("image/png");
+                    const pdf = new jsPDF({
+                        orientation: 'landscape',
+                        unit: 'px',
+                        format: [canvas.width / 2, canvas.height / 2]
+                    });
+                    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width / 2, canvas.height / 2);
+                    return pdf;
                 },
                 initDraggable() {
                     interact('.draggable').unset();
