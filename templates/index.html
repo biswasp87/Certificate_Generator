@@ -16,8 +16,11 @@
             touch-action: none;
             border: 1px dashed transparent;
         }
-        .draggable:hover {
+        .draggable.dragging-enabled:hover {
             border-color: blue;
+        }
+        .resizable {
+            box-sizing: border-box;
         }
         .preview-pane {
             position: relative;
@@ -78,7 +81,13 @@
                 <div v-if="selectedTemplate" class="col-span-12 grid grid-cols-12 gap-4">
                     <!-- Left: English Fields -->
                     <div class="col-span-2 bg-white p-4 rounded-lg shadow-md">
-                        <h3 class="font-bold mb-4 border-b">English Fields</h3>
+                        <h3 class="font-bold mb-2 border-b">English Fields</h3>
+                        <div class="mb-4">
+                            <label class="text-xs block">Default Font:</label>
+                            <select v-model="defaultEnglishFont" class="w-full text-xs border rounded p-1">
+                                <option v-for="f in fonts.english" :key="f" :value="f">{{ f }}</option>
+                            </select>
+                        </div>
                         <div v-for="col in englishColumns" :key="col.name" class="mb-2">
                             <button @click="addFieldToPreview(col)" class="w-full text-left p-2 bg-blue-50 hover:bg-blue-100 rounded text-sm">
                                 {{ col.name }}
@@ -88,7 +97,37 @@
 
                     <!-- Center: Preview Pane -->
                     <div class="col-span-8 bg-white p-4 rounded-lg shadow-md flex flex-col items-center">
-                        <h3 class="font-bold mb-4">Preview Pane</h3>
+                        <div class="w-full flex justify-between items-center mb-4">
+                            <h3 class="font-bold text-lg">Preview Pane</h3>
+
+                            <!-- Navigation Controls -->
+                            <div class="flex items-center space-x-2">
+                                <button @click="prevRecord" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">&lt; Prev</button>
+                                <div class="flex items-center">
+                                    <input type="number" v-model.number="currentRecordIndex" @change="validateRecordIndex" class="w-16 border rounded px-2 py-1 text-center">
+                                    <span class="ml-1">/ {{ excelData.length }}</span>
+                                </div>
+                                <button @click="nextRecord" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Next &gt;</button>
+                            </div>
+
+                            <!-- Global Toggles -->
+                            <div class="flex items-center space-x-4 text-sm">
+                                <label class="flex items-center space-x-1 cursor-pointer">
+                                    <input type="checkbox" v-model="draggingEnabled">
+                                    <span>Enable Drag</span>
+                                </label>
+                                <label class="flex items-center space-x-1 cursor-pointer">
+                                    <input type="checkbox" v-model="withTemplate">
+                                    <span>With Template</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- PDF Buttons -->
+                        <div class="flex space-x-4 mb-4">
+                            <button @click="downloadPDF" class="bg-red-600 text-white px-4 py-2 rounded shadow hover:bg-red-700">Download PDF</button>
+                            <button @click="downloadAllPDF" class="bg-red-800 text-white px-4 py-2 rounded shadow hover:bg-red-900">Download All PDF</button>
+                        </div>
 
                         <!-- Field Controls -->
                         <div v-if="selectedFieldIndex !== null" class="mb-4 p-2 border rounded bg-gray-50 flex items-center space-x-4">
@@ -106,21 +145,58 @@
                             <button @click="removeField(selectedFieldIndex)" class="text-red-600 text-sm">Remove</button>
                         </div>
 
-                        <div class="preview-pane shadow-2xl" :style="previewStyle" @click.self="selectedFieldIndex = null">
-                            <div v-for="(field, index) in activeFields" :key="index"
+                        <!-- Preview Pane Container -->
+                        <div class="preview-pane shadow-2xl" :style="previewStyle" @click.self="selectedFieldIndex = null; selectedSigIndex = null">
+                            <!-- Fields -->
+                            <div v-for="(field, index) in activeFields" :key="'field-'+index"
                                  class="draggable"
-                                 :class="{'ring-2 ring-blue-500': selectedFieldIndex === index}"
+                                 :class="{'ring-2 ring-blue-500': selectedFieldIndex === index, 'dragging-enabled': draggingEnabled}"
                                  :id="'field-' + index"
                                  :style="getFieldStyle(field)"
                                  @mousedown="selectField(index)">
-                                {{ getFieldLabel(field) }}
+                                {{ getRecordValue(field) }}
+                            </div>
+
+                            <!-- Signatures -->
+                            <div v-for="(sig, index) in activeSignatures" :key="'sig-'+index"
+                                 v-show="sig.visible"
+                                 class="draggable resizable border border-dashed border-gray-400"
+                                 :class="{'ring-2 ring-green-500': selectedSigIndex === index, 'dragging-enabled': draggingEnabled}"
+                                 :id="'sig-' + index"
+                                 :style="getSigStyle(sig)"
+                                 @mousedown="selectSig(index)">
+                                <img :src="'/uploads/' + getSigPath(sig.id)" class="w-full h-full pointer-events-none">
+                            </div>
+                        </div>
+
+                        <!-- Signature Management -->
+                        <div class="mt-8 w-full">
+                            <h4 class="font-bold border-b mb-4">Signatures</h4>
+                            <div class="grid grid-cols-4 gap-4">
+                                <div v-for="i in 4" :key="i" class="p-2 border rounded bg-gray-50 flex flex-col items-center">
+                                    <span class="text-xs font-bold mb-2">Signature {{ i }}</span>
+                                    <div v-if="getSigPath(i)" class="flex flex-col items-center">
+                                        <img :src="'/uploads/' + getSigPath(i)" class="h-12 mb-2">
+                                        <label class="text-xs flex items-center space-x-1">
+                                            <input type="checkbox" :checked="isSigVisible(i)" @change="toggleSig(i)">
+                                            <span>Insert</span>
+                                        </label>
+                                    </div>
+                                    <div v-else class="text-xs text-gray-400">Not uploaded</div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     <!-- Right: Hindi Fields -->
                     <div class="col-span-2 bg-white p-4 rounded-lg shadow-md">
-                        <h3 class="font-bold mb-4 border-b">Hindi Fields</h3>
+                        <h3 class="font-bold mb-2 border-b">Hindi Fields</h3>
+                        <div class="mb-4">
+                            <label class="text-xs block">Default Font:</label>
+                            <select v-model="defaultHindiFont" class="w-full text-xs border rounded p-1">
+                                <option v-for="f in fonts.hindi" :key="f" :value="f">{{ f }}</option>
+                            </select>
+                        </div>
                         <div v-for="col in hindiColumns" :key="col.name" class="mb-2">
                             <button @click="addFieldToPreview(col)" class="w-full text-left p-2 bg-orange-50 hover:bg-orange-100 rounded text-sm">
                                 {{ col.name }}
@@ -205,7 +281,19 @@
                     newSigs: [null, null, null, null],
                     activeFields: [],
                     selectedFieldIndex: null,
-                    fonts: { hindi: [], english: [] }
+                    activeSignatures: [],
+                    selectedSigIndex: null,
+                    fonts: { hindi: [], english: [] },
+                    currentRecordIndex: 0,
+                    withTemplate: true,
+                    draggingEnabled: true,
+                    defaultHindiFont: '',
+                    defaultEnglishFont: ''
+                }
+            },
+            watch: {
+                draggingEnabled(val) {
+                    this.initDraggable();
                 }
             },
             computed: {
@@ -215,11 +303,14 @@
                 hindiColumns() {
                     return this.excelColumns.filter(c => this.hindiMapping[c]).map(c => ({name: c, isHindi: true}));
                 },
+                previewScale() {
+                    if (!this.selectedTemplate) return 1;
+                    const maxWidth = 800;
+                    return Math.min(1, maxWidth / this.selectedTemplate.width);
+                },
                 previewStyle() {
                     if (!this.selectedTemplate) return {};
-                    // Scale down to fit in 800px width approximately
-                    const maxWidth = 800;
-                    const scale = Math.min(1, maxWidth / this.selectedTemplate.width);
+                    const scale = this.previewScale;
                     return {
                         width: (this.selectedTemplate.width * scale) + 'px',
                         height: (this.selectedTemplate.height * scale) + 'px',
@@ -324,46 +415,171 @@
                 selectTemplate(tpl) {
                     this.selectedTemplate = tpl;
                     this.activeFields = tpl.config.fields || [];
+                    this.activeSignatures = tpl.config.signatures || [
+                        {id: 1, x: 100, y: 100, width: 300, height: 150, visible: false},
+                        {id: 2, x: 500, y: 100, width: 300, height: 150, visible: false},
+                        {id: 3, x: 100, y: 400, width: 300, height: 150, visible: false},
+                        {id: 4, x: 500, y: 400, width: 300, height: 150, visible: false}
+                    ];
                     this.$nextTick(() => this.initDraggable());
                 },
                 addFieldToPreview(col) {
+                    const font = col.isHindi ? this.defaultHindiFont : this.defaultEnglishFont;
+                    const scale = this.previewScale;
                     this.activeFields.push({
                         name: col.name,
                         isHindi: col.isHindi,
-                        x: 50,
-                        y: 50,
-                        fontSize: 20,
-                        fontFamily: col.isHindi ? (this.fonts.hindi[0] || 'serif') : (this.fonts.english[0] || 'sans-serif')
+                        x: 100, // Original pixels
+                        y: 100, // Original pixels
+                        fontSize: 40, // Original pixels
+                        fontFamily: font || (col.isHindi ? (this.fonts.hindi[0] || 'serif') : (this.fonts.english[0] || 'sans-serif'))
                     });
                     this.$nextTick(() => this.initDraggable());
                 },
                 getFieldStyle(field) {
+                    const scale = this.previewScale;
                     return {
-                        left: field.x + 'px',
-                        top: field.y + 'px',
-                        fontSize: field.fontSize + 'px',
+                        left: (field.x * scale) + 'px',
+                        top: (field.y * scale) + 'px',
+                        fontSize: (field.fontSize * scale) + 'px',
                         fontFamily: field.fontFamily
                     };
                 },
-                getFieldLabel(field) {
+                getRecordValue(field) {
+                    if (this.excelData.length > 0) {
+                        return this.excelData[this.currentRecordIndex][field.name];
+                    }
                     return field.name;
                 },
                 selectField(index) {
+                    if (!this.draggingEnabled) return;
                     this.selectedFieldIndex = index;
+                    this.selectedSigIndex = null;
                 },
                 removeField(index) {
                     this.activeFields.splice(index, 1);
                     this.selectedFieldIndex = null;
                     this.saveConfig();
                 },
+                selectSig(index) {
+                    if (!this.draggingEnabled) return;
+                    this.selectedSigIndex = index;
+                    this.selectedFieldIndex = null;
+                },
+                getSigStyle(sig) {
+                    const scale = this.previewScale;
+                    return {
+                        left: (sig.x * scale) + 'px',
+                        top: (sig.y * scale) + 'px',
+                        width: (sig.width * scale) + 'px',
+                        height: (sig.height * scale) + 'px'
+                    };
+                },
+                getSigPath(id) {
+                    if (!this.selectedTemplate) return null;
+                    return this.selectedTemplate[`sig${id}_path`];
+                },
+                isSigVisible(id) {
+                    const sig = this.activeSignatures.find(s => s.id === id);
+                    return sig ? sig.visible : false;
+                },
+                toggleSig(id) {
+                    const sig = this.activeSignatures.find(s => s.id === id);
+                    if (sig) {
+                        sig.visible = !sig.visible;
+                        this.saveConfig();
+                    }
+                },
+                prevRecord() {
+                    if (this.currentRecordIndex > 0) this.currentRecordIndex--;
+                },
+                nextRecord() {
+                    if (this.currentRecordIndex < this.excelData.length - 1) this.currentRecordIndex++;
+                },
+                validateRecordIndex() {
+                    if (this.currentRecordIndex < 0) this.currentRecordIndex = 0;
+                    if (this.currentRecordIndex >= this.excelData.length) this.currentRecordIndex = this.excelData.length - 1;
+                },
+                async downloadPDF() {
+                    const res = await fetch('/generate_pdf', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            template_id: this.selectedTemplate.id,
+                            record_index: this.currentRecordIndex,
+                            with_template: this.withTemplate
+                        })
+                    });
+                    const blob = await res.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `certificate_${this.currentRecordIndex}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                },
+                async downloadAllPDF() {
+                    const res = await fetch('/generate_all_pdf', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            template_id: this.selectedTemplate.id,
+                            with_template: this.withTemplate
+                        })
+                    });
+                    const blob = await res.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `all_certificates.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                },
                 initDraggable() {
+                    interact('.draggable').unset();
+                    interact('.resizable').unset();
+
+                    if (!this.draggingEnabled) return;
+
                     interact('.draggable').draggable({
+                        enabled: this.draggingEnabled,
                         listeners: {
                             move: (event) => {
+                                if (!this.draggingEnabled) return;
+                                const parts = event.target.id.split('-');
+                                const type = parts[0];
+                                const index = parts[1];
+                                const scale = this.previewScale;
+                                if (type === 'field') {
+                                    const field = this.activeFields[index];
+                                    field.x += event.dx / scale;
+                                    field.y += event.dy / scale;
+                                } else if (type === 'sig') {
+                                    const sig = this.activeSignatures[index];
+                                    sig.x += event.dx / scale;
+                                    sig.y += event.dy / scale;
+                                }
+                            },
+                            end: (event) => {
+                                this.saveConfig();
+                            }
+                        }
+                    });
+
+                    interact('.resizable').resizable({
+                        edges: { left: true, right: true, bottom: true, top: true },
+                        listeners: {
+                            move: (event) => {
+                                if (!this.draggingEnabled) return;
+                                const scale = this.previewScale;
                                 const index = event.target.id.split('-')[1];
-                                const field = this.activeFields[index];
-                                field.x += event.dx;
-                                field.y += event.dy;
+                                const sig = this.activeSignatures[index];
+                                sig.width = event.rect.width / scale;
+                                sig.height = event.rect.height / scale;
+                                sig.x += event.deltaRect.left / scale;
+                                sig.y += event.deltaRect.top / scale;
                             },
                             end: (event) => {
                                 this.saveConfig();
@@ -376,7 +592,10 @@
                     await fetch(`/update_template/${this.selectedTemplate.id}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ config: { fields: this.activeFields } })
+                        body: JSON.stringify({ config: {
+                            fields: this.activeFields,
+                            signatures: this.activeSignatures
+                        } })
                     });
                 }
             }

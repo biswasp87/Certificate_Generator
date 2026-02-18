@@ -5,6 +5,10 @@ from flask_cors import CORS
 from models import db, Template, ExcelColumn, ExcelRow
 from PIL import Image
 from werkzeug.utils import secure_filename
+from fpdf import FPDF
+import json
+import io
+from flask import send_file
 
 app = Flask(__name__)
 CORS(app)
@@ -153,6 +157,104 @@ def delete_template(template_id):
     db.session.delete(template)
     db.session.commit()
     return jsonify({'message': 'Template deleted'})
+
+@app.route('/generate_pdf', methods=['POST'])
+def generate_pdf():
+    req_data = request.json
+    template_id = req_data.get('template_id')
+    record_index = req_data.get('record_index', 0)
+    with_template = req_data.get('with_template', True)
+
+    template = Template.query.get_or_404(template_id)
+    records = ExcelRow.query.all()
+    if record_index >= len(records):
+        return jsonify({'error': 'Record index out of range'}), 400
+
+    record = records[record_index].data
+    config = template.config
+
+    pdf = create_pdf_from_record(template, record, config, with_template)
+
+    buf = io.BytesIO()
+    buf.write(pdf.output())
+    buf.seek(0)
+
+    return send_file(buf, download_name=f"certificate_{record_index}.pdf", as_attachment=True)
+
+@app.route('/generate_all_pdf', methods=['POST'])
+def generate_all_pdf():
+    req_data = request.json
+    template_id = req_data.get('template_id')
+    with_template = req_data.get('with_template', True)
+
+    template = Template.query.get_or_404(template_id)
+    records = ExcelRow.query.all()
+    config = template.config
+
+    pdf = FPDF(orientation='L', unit='pt', format=(template.width, template.height))
+
+    # Load fonts once
+    font_files = get_fonts_internal()
+    for f in font_files['hindi']:
+        pdf.add_font(f, '', os.path.join('fonts', 'Hindi Font', f))
+    for f in font_files['english']:
+        pdf.add_font(f, '', os.path.join('fonts', 'English Font', f))
+
+    for rec_obj in records:
+        pdf.add_page()
+        draw_record_on_pdf(pdf, template, rec_obj.data, config, with_template)
+
+    buf = io.BytesIO()
+    buf.write(pdf.output())
+    buf.seek(0)
+
+    return send_file(buf, download_name="all_certificates.pdf", as_attachment=True)
+
+def get_fonts_internal():
+    hindi_fonts = os.listdir('fonts/Hindi Font')
+    english_fonts = os.listdir('fonts/English Font')
+    return {
+        'hindi': [f for f in hindi_fonts if f.endswith(('.ttf', '.otf'))],
+        'english': [f for f in english_fonts if f.endswith(('.ttf', '.otf'))]
+    }
+
+def create_pdf_from_record(template, record, config, with_template):
+    pdf = FPDF(orientation='L', unit='pt', format=(template.width, template.height))
+
+    # Load fonts
+    font_files = get_fonts_internal()
+    for f in font_files['hindi']:
+        pdf.add_font(f, '', os.path.join('fonts', 'Hindi Font', f))
+    for f in font_files['english']:
+        pdf.add_font(f, '', os.path.join('fonts', 'English Font', f))
+
+    pdf.add_page()
+    draw_record_on_pdf(pdf, template, record, config, with_template)
+    return pdf
+
+def draw_record_on_pdf(pdf, template, record, config, with_template):
+    if with_template:
+        img_path = os.path.join(app.config['UPLOAD_FOLDER'], template.image_path)
+        pdf.image(img_path, x=0, y=0, w=template.width, h=template.height)
+
+    fields = config.get('fields', [])
+    for field in fields:
+        val = str(record.get(field['name'], ''))
+        pdf.set_font(field['fontFamily'], size=field['fontSize'])
+        # Adjust y because fpdf y is baseline or top? In fpdf it is top.
+        # But we need to check how our x,y relate to pdf x,y.
+        # Frontend uses pixels. PDF uses points. We initialized PDF with width/height in points equal to image pixels.
+        pdf.text(field['x'], field['y'] + field['fontSize'], val)
+
+    # Signatures
+    sigs = config.get('signatures', [])
+    for sig in sigs:
+        if sig.get('visible'):
+            sig_path_attr = f"sig{sig['id']}_path"
+            sig_rel_path = getattr(template, sig_path_attr)
+            if sig_rel_path:
+                full_sig_path = os.path.join(app.config['UPLOAD_FOLDER'], sig_rel_path)
+                pdf.image(full_sig_path, x=sig['x'], y=sig['y'], w=sig['width'], h=sig['height'])
 
 @app.route('/upload_signatures/<int:template_id>', methods=['POST'])
 def upload_signatures(template_id):
