@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Certificate Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/interactjs/dist/interact.min.js"></script>
+    <style id="dynamic-fonts"></style>
+    <style>
+        .draggable {
+            position: absolute;
+            cursor: move;
+            user-select: none;
+            touch-action: none;
+            border: 1px dashed transparent;
+        }
+        .draggable:hover {
+            border-color: blue;
+        }
+        .preview-pane {
+            position: relative;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            margin: auto;
+        }
+        [v-cloak] { display: none; }
+    </style>
+</head>
+<body class="bg-gray-100">
+{% raw %}
+    <div id="app" v-cloak>
+        <header class="bg-blue-800 text-white p-6 shadow-lg mb-8">
+            <h1 class="text-4xl font-extrabold text-center">Certificate Generator</h1>
+        </header>
+
+        <main class="max-w-7xl mx-auto px-4">
+            <!-- Excel Upload Section -->
+            <section v-if="!columnsMarked" class="bg-white p-8 rounded-lg shadow-md mb-8">
+                <h2 class="text-2xl font-bold mb-4">Step 1: Upload Excel Data</h2>
+                <div class="flex items-center space-x-4">
+                    <input type="file" @change="handleExcelUpload" accept=".xlsx, .xls" class="border p-2 rounded">
+                    <button v-if="excelColumns.length" @click="showMappingModal = true" class="bg-green-600 text-white px-4 py-2 rounded">Mark Columns</button>
+                </div>
+            </section>
+
+            <!-- Template Management -->
+            <section v-if="columnsMarked" class="grid grid-cols-12 gap-6">
+                <!-- Template List & Upload -->
+                <div class="col-span-12 bg-white p-6 rounded-lg shadow-md mb-6">
+                    <h2 class="text-xl font-bold mb-4">Templates</h2>
+                    <div class="flex flex-wrap gap-4 mb-4">
+                        <div v-for="tpl in templates" :key="tpl.id" class="border p-4 rounded text-center">
+                            <img :src="'/uploads/' + tpl.image_path" class="w-24 h-24 object-cover mx-auto mb-2">
+                            <p class="font-bold">{{ tpl.name }}</p>
+                            <div class="mt-2 space-x-2">
+                                <button @click="selectTemplate(tpl)" class="text-blue-600 hover:underline">Select</button>
+                                <button @click="deleteTemplate(tpl.id)" class="text-red-600 hover:underline">Delete</button>
+                            </div>
+                        </div>
+                    </div>
+                    <button @click="showTemplateUpload = true" class="bg-blue-600 text-white px-4 py-2 rounded">Add New Template</button>
+                </div>
+
+                <!-- Preview Area (Three Columns) -->
+                <div v-if="selectedTemplate" class="col-span-12 grid grid-cols-12 gap-4">
+                    <!-- Left: English Fields -->
+                    <div class="col-span-2 bg-white p-4 rounded-lg shadow-md">
+                        <h3 class="font-bold mb-4 border-b">English Fields</h3>
+                        <div v-for="col in englishColumns" :key="col.name" class="mb-2">
+                            <button @click="addFieldToPreview(col)" class="w-full text-left p-2 bg-blue-50 hover:bg-blue-100 rounded text-sm">
+                                {{ col.name }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Center: Preview Pane -->
+                    <div class="col-span-8 bg-white p-4 rounded-lg shadow-md flex flex-col items-center">
+                        <h3 class="font-bold mb-4">Preview Pane</h3>
+
+                        <!-- Field Controls -->
+                        <div v-if="selectedFieldIndex !== null" class="mb-4 p-2 border rounded bg-gray-50 flex items-center space-x-4">
+                            <span class="font-bold">{{ activeFields[selectedFieldIndex].name }}</span>
+                            <div>
+                                <label class="text-xs">Font Size:</label>
+                                <input type="number" v-model="activeFields[selectedFieldIndex].fontSize" @change="saveConfig" class="w-16 border p-1 rounded">
+                            </div>
+                            <div>
+                                <label class="text-xs">Font:</label>
+                                <select v-model="activeFields[selectedFieldIndex].fontFamily" @change="saveConfig" class="border p-1 rounded">
+                                    <option v-for="f in (activeFields[selectedFieldIndex].isHindi ? fonts.hindi : fonts.english)" :key="f" :value="f">{{ f }}</option>
+                                </select>
+                            </div>
+                            <button @click="removeField(selectedFieldIndex)" class="text-red-600 text-sm">Remove</button>
+                        </div>
+
+                        <div class="preview-pane shadow-2xl" :style="previewStyle" @click.self="selectedFieldIndex = null">
+                            <div v-for="(field, index) in activeFields" :key="index"
+                                 class="draggable"
+                                 :class="{'ring-2 ring-blue-500': selectedFieldIndex === index}"
+                                 :id="'field-' + index"
+                                 :style="getFieldStyle(field)"
+                                 @mousedown="selectField(index)">
+                                {{ getFieldLabel(field) }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Hindi Fields -->
+                    <div class="col-span-2 bg-white p-4 rounded-lg shadow-md">
+                        <h3 class="font-bold mb-4 border-b">Hindi Fields</h3>
+                        <div v-for="col in hindiColumns" :key="col.name" class="mb-2">
+                            <button @click="addFieldToPreview(col)" class="w-full text-left p-2 bg-orange-50 hover:bg-orange-100 rounded text-sm">
+                                {{ col.name }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Modals -->
+        <!-- Column Mapping Modal -->
+        <div v-if="showMappingModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white p-8 rounded-lg max-w-2xl w-full">
+                <h2 class="text-2xl font-bold mb-4">Mark Hindi Columns</h2>
+                <div class="max-h-96 overflow-y-auto mb-4">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="border-b">
+                                <th class="text-left p-2">Column Header</th>
+                                <th class="text-center p-2">Is Hindi Data?</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="col in excelColumns" :key="col" class="border-b">
+                                <td class="p-2">{{ col }}</td>
+                                <td class="text-center p-2">
+                                    <input type="checkbox" v-model="hindiMapping[col]">
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="flex justify-end space-x-4">
+                    <button @click="showMappingModal = false" class="px-4 py-2 border rounded">Cancel</button>
+                    <button @click="saveMapping" class="px-4 py-2 bg-blue-600 text-white rounded">Save & Continue</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Template Upload Modal -->
+        <div v-if="showTemplateUpload" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white p-8 rounded-lg max-w-md w-full">
+                <h2 class="text-2xl font-bold mb-4">Upload Template</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block mb-1">Template Name</label>
+                        <input type="text" v-model="newTemplateName" class="w-full border p-2 rounded">
+                    </div>
+                    <div>
+                        <label class="block mb-1">Template Image</label>
+                        <input type="file" @change="e => newTemplateFile = e.target.files[0]" class="w-full border p-2 rounded">
+                    </div>
+                    <div v-for="i in 4" :key="i">
+                        <label class="block mb-1">Signature {{ i }}</label>
+                        <input type="file" @change="e => newSigs[i-1] = e.target.files[0]" class="w-full border p-2 rounded">
+                    </div>
+                </div>
+                <div class="flex justify-end mt-6 space-x-4">
+                    <button @click="showTemplateUpload = false" class="px-4 py-2 border rounded">Cancel</button>
+                    <button @click="uploadTemplate" class="px-4 py-2 bg-blue-600 text-white rounded">Upload</button>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endraw %}
+    <script>
+        const { createApp } = Vue;
+        createApp({
+            data() {
+                return {
+                    excelColumns: [],
+                    excelData: [],
+                    hindiMapping: {},
+                    columnsMarked: false,
+                    showMappingModal: false,
+                    templates: [],
+                    selectedTemplate: null,
+                    showTemplateUpload: false,
+                    newTemplateName: '',
+                    newTemplateFile: null,
+                    newSigs: [null, null, null, null],
+                    activeFields: [],
+                    selectedFieldIndex: null,
+                    fonts: { hindi: [], english: [] }
+                }
+            },
+            computed: {
+                englishColumns() {
+                    return this.excelColumns.filter(c => !this.hindiMapping[c]).map(c => ({name: c, isHindi: false}));
+                },
+                hindiColumns() {
+                    return this.excelColumns.filter(c => this.hindiMapping[c]).map(c => ({name: c, isHindi: true}));
+                },
+                previewStyle() {
+                    if (!this.selectedTemplate) return {};
+                    // Scale down to fit in 800px width approximately
+                    const maxWidth = 800;
+                    const scale = Math.min(1, maxWidth / this.selectedTemplate.width);
+                    return {
+                        width: (this.selectedTemplate.width * scale) + 'px',
+                        height: (this.selectedTemplate.height * scale) + 'px',
+                        backgroundImage: `url('/uploads/${this.selectedTemplate.image_path}')`,
+                        backgroundSize: '100% 100%'
+                    };
+                }
+            },
+            mounted() {
+                this.loadTemplates();
+                this.loadFonts();
+            },
+            methods: {
+                async handleExcelUpload(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    const res = await fetch('/upload_excel', { method: 'POST', body: formData });
+                    const data = await res.json();
+                    this.excelColumns = data.columns;
+                    this.excelData = data.data;
+                    this.excelColumns.forEach(c => this.hindiMapping[c] = false);
+                    this.showMappingModal = true;
+                },
+                async saveMapping() {
+                    const columns = this.excelColumns.map(c => ({ name: c, is_hindi: this.hindiMapping[c] }));
+                    await fetch('/save_mapping', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ columns, data: this.excelData })
+                    });
+                    this.showMappingModal = false;
+                    this.columnsMarked = true;
+                },
+                async loadTemplates() {
+                    const res = await fetch('/templates');
+                    this.templates = await res.json();
+                },
+                async loadFonts() {
+                    const res = await fetch('/fonts');
+                    this.fonts = await res.json();
+                    this.updateFontStyles();
+                },
+                updateFontStyles() {
+                    let css = '';
+                    this.fonts.hindi.forEach(f => {
+                        css += `@font-face { font-family: '${f}'; src: url('/font_files/Hindi Font/${f}'); }\n`;
+                    });
+                    this.fonts.english.forEach(f => {
+                        css += `@font-face { font-family: '${f}'; src: url('/font_files/English Font/${f}'); }\n`;
+                    });
+                    document.getElementById('dynamic-fonts').innerHTML = css;
+                },
+                async uploadTemplate() {
+                    const formData = new FormData();
+                    formData.append('name', this.newTemplateName);
+                    formData.append('file', this.newTemplateFile);
+                    const res = await fetch('/upload_template', { method: 'POST', body: formData });
+                    const result = await res.json();
+
+                    const sigData = new FormData();
+                    this.newSigs.forEach((sig, i) => {
+                        if (sig) sigData.append(`sig${i+1}`, sig);
+                    });
+                    if (sigData.has('sig1') || sigData.has('sig2') || sigData.has('sig3') || sigData.has('sig4')) {
+                        await fetch(`/upload_signatures/${result.id}`, { method: 'POST', body: sigData });
+                    }
+
+                    this.showTemplateUpload = false;
+                    this.loadTemplates();
+                },
+                async deleteTemplate(id) {
+                    await fetch(`/delete_template/${id}`, { method: 'DELETE' });
+                    this.loadTemplates();
+                    if (this.selectedTemplate && this.selectedTemplate.id === id) this.selectedTemplate = null;
+                },
+                selectTemplate(tpl) {
+                    this.selectedTemplate = tpl;
+                    this.activeFields = tpl.config.fields || [];
+                    this.$nextTick(() => this.initDraggable());
+                },
+                addFieldToPreview(col) {
+                    this.activeFields.push({
+                        name: col.name,
+                        isHindi: col.isHindi,
+                        x: 50,
+                        y: 50,
+                        fontSize: 20,
+                        fontFamily: col.isHindi ? (this.fonts.hindi[0] || 'serif') : (this.fonts.english[0] || 'sans-serif')
+                    });
+                    this.$nextTick(() => this.initDraggable());
+                },
+                getFieldStyle(field) {
+                    return {
+                        left: field.x + 'px',
+                        top: field.y + 'px',
+                        fontSize: field.fontSize + 'px',
+                        fontFamily: field.fontFamily
+                    };
+                },
+                getFieldLabel(field) {
+                    return field.name;
+                },
+                selectField(index) {
+                    this.selectedFieldIndex = index;
+                },
+                removeField(index) {
+                    this.activeFields.splice(index, 1);
+                    this.selectedFieldIndex = null;
+                    this.saveConfig();
+                },
+                initDraggable() {
+                    interact('.draggable').draggable({
+                        listeners: {
+                            move: (event) => {
+                                const index = event.target.id.split('-')[1];
+                                const field = this.activeFields[index];
+                                field.x += event.dx;
+                                field.y += event.dy;
+                            },
+                            end: (event) => {
+                                this.saveConfig();
+                            }
+                        }
+                    });
+                },
+                async saveConfig() {
+                    if (!this.selectedTemplate) return;
+                    await fetch(`/update_template/${this.selectedTemplate.id}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ config: { fields: this.activeFields } })
+                    });
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
