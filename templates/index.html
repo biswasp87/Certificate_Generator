@@ -363,6 +363,15 @@
                 this.loadExcelData();
             },
             methods: {
+                loadImage(url) {
+                    return new Promise((resolve, reject) => {
+                        const img = new Image();
+                        img.crossOrigin = 'Anonymous';
+                        img.onload = () => resolve(img);
+                        img.onerror = (e) => reject(e);
+                        img.src = url;
+                    });
+                },
                 async handleExcelUpload(event) {
                     const file = event.target.files[0];
                     if (!file) return;
@@ -584,8 +593,21 @@
                 },
                 async downloadAllPDF() {
                     const { jsPDF } = window.jspdf;
+                    const tpl = this.selectedTemplate;
+                    if (!tpl) return;
+
                     let finalPdf = null;
                     const originalIndex = this.currentRecordIndex;
+                    const orientation = tpl.width >= tpl.height ? 'landscape' : 'portrait';
+                    let tplImg = null;
+
+                    if (this.withTemplate) {
+                        try {
+                            tplImg = await this.loadImage(`/uploads/${tpl.image_path}`);
+                        } catch (e) {
+                            console.error("Failed to load template image:", e);
+                        }
+                    }
 
                     for (let i = 0; i < this.excelData.length; i++) {
                         this.currentRecordIndex = i;
@@ -593,18 +615,22 @@
                         await new Promise(r => setTimeout(r, 150)); // Wait for render
 
                         const canvas = await this.getCanvas();
-                        const img = canvas.toDataURL("image/png");
+                        const foregroundData = canvas.toDataURL("image/png");
 
                         if (!finalPdf) {
                             finalPdf = new jsPDF({
-                                orientation: 'landscape',
+                                orientation: orientation,
                                 unit: 'px',
-                                format: [canvas.width / 2, canvas.height / 2]
+                                format: [tpl.width, tpl.height]
                             });
                         } else {
-                            finalPdf.addPage([canvas.width / 2, canvas.height / 2], 'landscape');
+                            finalPdf.addPage([tpl.width, tpl.height], orientation);
                         }
-                        finalPdf.addImage(img, 'PNG', 0, 0, canvas.width / 2, canvas.height / 2);
+
+                        if (tplImg) {
+                            finalPdf.addImage(tplImg, 'JPEG', 0, 0, tpl.width, tpl.height);
+                        }
+                        finalPdf.addImage(foregroundData, 'PNG', 0, 0, tpl.width, tpl.height);
                     }
 
                     this.currentRecordIndex = originalIndex;
@@ -634,32 +660,48 @@
 
                     const element = document.querySelector(".preview-pane");
                     const originalBG = element.style.backgroundImage;
-                    if (!this.withTemplate) {
-                        element.style.backgroundImage = 'none';
-                        element.style.backgroundColor = 'white';
-                    }
+
+                    // Always hide background for foreground capture to maintain original quality
+                    element.style.backgroundImage = 'none';
+                    element.style.backgroundColor = 'transparent';
 
                     const canvas = await html2canvas(element, {
                         scale: this.pdfDPI / 96,
                         useCORS: true,
-                        backgroundColor: this.withTemplate ? null : "#ffffff"
+                        backgroundColor: null // Transparent
                     });
 
-                    if (!this.withTemplate) {
-                        element.style.backgroundImage = originalBG;
-                    }
+                    element.style.backgroundImage = originalBG;
+                    element.style.backgroundColor = '';
                     return canvas;
                 },
                 async capturePreview() {
                     const { jsPDF } = window.jspdf;
+                    const tpl = this.selectedTemplate;
+                    if (!tpl) return null;
+
                     const canvas = await this.getCanvas();
-                    const imgData = canvas.toDataURL("image/png");
+                    const foregroundData = canvas.toDataURL("image/png");
+
+                    const orientation = tpl.width >= tpl.height ? 'landscape' : 'portrait';
                     const pdf = new jsPDF({
-                        orientation: 'landscape',
+                        orientation: orientation,
                         unit: 'px',
-                        format: [canvas.width / 2, canvas.height / 2]
+                        format: [tpl.width, tpl.height]
                     });
-                    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width / 2, canvas.height / 2);
+
+                    if (this.withTemplate) {
+                        try {
+                            const tplImg = await this.loadImage(`/uploads/${tpl.image_path}`);
+                            pdf.addImage(tplImg, 'JPEG', 0, 0, tpl.width, tpl.height);
+                        } catch (e) {
+                            console.error("Failed to load template image for PDF:", e);
+                        }
+                    }
+
+                    // Overlay foreground (text and signatures)
+                    pdf.addImage(foregroundData, 'PNG', 0, 0, tpl.width, tpl.height);
+
                     return pdf;
                 },
                 initDraggable() {
