@@ -38,7 +38,7 @@
 {% raw %}
     <div id="app" v-cloak>
         <header class="bg-blue-800 text-white p-6 shadow-lg mb-8">
-            <h1 class="text-4xl font-extrabold text-center">Certificate Generator</h1>
+            <h1 class="text-4xl font-extrabold text-center tracking-wide uppercase">Certificate Generator</h1>
         </header>
 
         <main class="max-w-7xl mx-auto px-4">
@@ -136,6 +136,17 @@
                                     <option value="">(Index)</option>
                                     <option v-for="col in excelColumns" :key="col" :value="col">{{ col }}</option>
                                 </select>
+                            </div>
+                            <div class="flex items-center space-x-2 border-l pl-4">
+                                <label class="text-xs font-bold flex items-center space-x-1 cursor-pointer">
+                                    <input type="checkbox" v-model="useCustomPrintSize">
+                                    <span>Custom Size (mm):</span>
+                                </label>
+                                <div v-if="useCustomPrintSize" class="flex items-center space-x-1">
+                                    <input type="number" v-model.number="printWidthMM" class="w-16 border p-1 rounded text-xs" title="Width in mm">
+                                    <span class="text-xs">×</span>
+                                    <input type="number" v-model.number="printHeightMM" class="w-16 border p-1 rounded text-xs" title="Height in mm">
+                                </div>
                             </div>
                             <div class="flex space-x-2">
                                 <button @click="downloadPDF" class="bg-red-600 text-white px-4 py-2 rounded shadow hover:bg-red-700 text-sm font-bold">Download PDF</button>
@@ -326,7 +337,10 @@
                     withTemplate: true,
                     draggingEnabled: true,
                     pdfDPI: 300,
-                    filenameColumn: ''
+                    filenameColumn: '',
+                    useCustomPrintSize: false,
+                    printWidthMM: 297,
+                    printHeightMM: 210
                 }
             },
             watch: {
@@ -598,9 +612,23 @@
 
                     let finalPdf = null;
                     const originalIndex = this.currentRecordIndex;
-                    const orientation = tpl.width >= tpl.height ? 'landscape' : 'portrait';
-                    let tplImg = null;
 
+                    let pdfUnit, pdfFormat, pdfOrientation, drawWidth, drawHeight;
+                    if (this.useCustomPrintSize) {
+                        pdfUnit = 'mm';
+                        pdfFormat = [this.printWidthMM, this.printHeightMM];
+                        pdfOrientation = this.printWidthMM >= this.printHeightMM ? 'landscape' : 'portrait';
+                        drawWidth = this.printWidthMM;
+                        drawHeight = this.printHeightMM;
+                    } else {
+                        pdfUnit = 'px';
+                        pdfFormat = [tpl.width, tpl.height];
+                        pdfOrientation = tpl.width >= tpl.height ? 'landscape' : 'portrait';
+                        drawWidth = tpl.width;
+                        drawHeight = tpl.height;
+                    }
+
+                    let tplImg = null;
                     if (this.withTemplate) {
                         try {
                             tplImg = await this.loadImage(`/uploads/${tpl.image_path}`);
@@ -619,18 +647,18 @@
 
                         if (!finalPdf) {
                             finalPdf = new jsPDF({
-                                orientation: orientation,
-                                unit: 'px',
-                                format: [tpl.width, tpl.height]
+                                orientation: pdfOrientation,
+                                unit: pdfUnit,
+                                format: pdfFormat
                             });
                         } else {
-                            finalPdf.addPage([tpl.width, tpl.height], orientation);
+                            finalPdf.addPage(pdfFormat, pdfOrientation);
                         }
 
                         if (tplImg) {
-                            finalPdf.addImage(tplImg, 'JPEG', 0, 0, tpl.width, tpl.height);
+                            finalPdf.addImage(tplImg, 'JPEG', 0, 0, drawWidth, drawHeight);
                         }
-                        finalPdf.addImage(foregroundData, 'PNG', 0, 0, tpl.width, tpl.height);
+                        finalPdf.addImage(foregroundData, 'PNG', 0, 0, drawWidth, drawHeight);
                     }
 
                     this.currentRecordIndex = originalIndex;
@@ -683,24 +711,36 @@
                     const canvas = await this.getCanvas();
                     const foregroundData = canvas.toDataURL("image/png");
 
-                    const orientation = tpl.width >= tpl.height ? 'landscape' : 'portrait';
-                    const pdf = new jsPDF({
-                        orientation: orientation,
-                        unit: 'px',
-                        format: [tpl.width, tpl.height]
-                    });
+                    let pdfOptions;
+                    if (this.useCustomPrintSize) {
+                        pdfOptions = {
+                            orientation: this.printWidthMM >= this.printHeightMM ? 'landscape' : 'portrait',
+                            unit: 'mm',
+                            format: [this.printWidthMM, this.printHeightMM]
+                        };
+                    } else {
+                        pdfOptions = {
+                            orientation: tpl.width >= tpl.height ? 'landscape' : 'portrait',
+                            unit: 'px',
+                            format: [tpl.width, tpl.height]
+                        };
+                    }
+
+                    const pdf = new jsPDF(pdfOptions);
+                    const drawWidth = this.useCustomPrintSize ? this.printWidthMM : tpl.width;
+                    const drawHeight = this.useCustomPrintSize ? this.printHeightMM : tpl.height;
 
                     if (this.withTemplate) {
                         try {
                             const tplImg = await this.loadImage(`/uploads/${tpl.image_path}`);
-                            pdf.addImage(tplImg, 'JPEG', 0, 0, tpl.width, tpl.height);
+                            pdf.addImage(tplImg, 'JPEG', 0, 0, drawWidth, drawHeight);
                         } catch (e) {
                             console.error("Failed to load template image for PDF:", e);
                         }
                     }
 
                     // Overlay foreground (text and signatures)
-                    pdf.addImage(foregroundData, 'PNG', 0, 0, tpl.width, tpl.height);
+                    pdf.addImage(foregroundData, 'PNG', 0, 0, drawWidth, drawHeight);
 
                     return pdf;
                 },
